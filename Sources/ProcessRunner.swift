@@ -1,7 +1,7 @@
 
 import Foundation
 
-enum AsyncProcessError: Error, CustomStringConvertible {
+enum ProcessRunnerError: Error, CustomStringConvertible {
     case InvalidExecutable(path: String?)
     
     var description: String {
@@ -11,34 +11,43 @@ enum AsyncProcessError: Error, CustomStringConvertible {
         }
     }
 }
+public typealias ProcessResult = (output:String?, error:String?, exitCode:Int32)
 
 /**
  ```
  var didWrite = false
  var result = ""
- let process = try? AsyncProcess(launchPath: "/usr/bin/openssl")
+ let process = try? ProcessRunner(launchPath: "/usr/bin/openssl")
  process!.stdOut { (handle: FileHandle) in
- let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
- print("stdOut: \(str)")
- if str == "OpenSSL> " && !didWrite {
- didWrite = true
- process?.write("foobar\n".data(using: .utf8)!)
- }
+     let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
+     print("stdOut: \(str)")
+     if str == "OpenSSL> " && !didWrite {
+         didWrite = true
+         process?.write("foobar\n".data(using: .utf8)!)
+     }
  }
  process!.stdErr { (handle: FileHandle) in
- let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
- print("stdErr: \(str)")
+     let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
+     print("stdErr: \(str)")
  }
  process!.launch()
  ```
  */
-public class AsyncProcess {
+public protocol ProcessRunnable {
+    init(launchPath: String, arguments: [String]?, environment: [String:String]?, stdOut: ((_ stdOutRead: FileHandle) -> Void)?, stdErr: ((_ stdErrRead: FileHandle) -> Void)?) throws
+    
+    @discardableResult
+    static func synchronousRun(_ launchPath: String, arguments: [String]?, printOutput: Bool, outputPrefix: String?) -> ProcessResult
+}
+
+public class ProcessRunner {
     
     public let executingProcess: Process
     public let stdOutPipe: Pipe
     public let stdErrPipe: Pipe
     public let stdInPipe: Pipe
     
+    //Async process
     public init(launchPath: String,
                 arguments: [String]? = nil,
                 environment: [String:String]? = nil,
@@ -49,7 +58,7 @@ public class AsyncProcess {
         executingProcess.launchPath = (launchPath as NSString).standardizingPath
         guard let path = executingProcess.launchPath,
             FileManager.default.isExecutableFile(atPath: path) else {
-                throw AsyncProcessError.InvalidExecutable(path: executingProcess.launchPath)
+                throw ProcessRunnerError.InvalidExecutable(path: executingProcess.launchPath)
         }
         
         //Arguments
@@ -113,5 +122,41 @@ public class AsyncProcess {
     
     func write(_ data: Data) {
         stdInPipe.fileHandleForWriting.write(data)
+    }
+    
+    @discardableResult
+    public static func synchronousRun(_ launchPath: String, arguments: [String]? = nil, printOutput: Bool = false, outputPrefix: String? = nil, environment: [String:String]? = nil) -> ProcessResult {
+        do {
+            var output = ""
+            var error: String?
+            let prefix = outputPrefix != nil ? "\(outputPrefix!): " : ""
+            let process = try ProcessRunner(launchPath: launchPath, arguments: arguments)
+            process.stdOut { (handle: FileHandle) in
+                if let str = String.init(data: handle.availableData as Data, encoding: .utf8) {
+                    let line =  "\(prefix)\(str)"
+                    output.append(line)
+                    if printOutput {
+                        print(line)
+                    }
+                }
+                
+            }
+            process.stdErr { (handle: FileHandle) in
+                let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
+                print("stdErr: \(str)")
+                if error == nil {
+                    error = ""
+                }
+                error?.append(str)
+            }
+            process.launch()
+            while process.executingProcess.isRunning {
+                RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
+            }
+            return (output, error, process.executingProcess.terminationStatus)
+            
+        } catch let e {
+            return (nil, String(describing: e), -1)
+        }
     }
 }

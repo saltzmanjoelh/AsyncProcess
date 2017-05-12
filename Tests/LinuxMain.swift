@@ -1,6 +1,6 @@
 import XCTest
-@testable import AsyncProcessTests
+@testable import ProcessRunnerTests
 
 XCTMain([
-    testCase(AsyncProcessTests.allTests),
+    testCase(ProcessRunnerTests.allTests),
 ])
