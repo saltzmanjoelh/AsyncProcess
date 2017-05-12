@@ -37,10 +37,11 @@ public protocol ProcessRunnable {
     init(launchPath: String, arguments: [String]?, environment: [String:String]?, stdOut: ((_ stdOutRead: FileHandle) -> Void)?, stdErr: ((_ stdErrRead: FileHandle) -> Void)?) throws
     
     @discardableResult
-    static func synchronousRun(_ launchPath: String, arguments: [String]?, printOutput: Bool, outputPrefix: String?) -> ProcessResult
+    static func synchronousRun(_ launchPath: String, arguments: [String]?, printOutput: Bool, outputPrefix: String?, environment: [String:String]?) -> ProcessResult
 }
 
-public class ProcessRunner {
+public class ProcessRunner: ProcessRunnable {
+
     
     public let executingProcess: Process
     public let stdOutPipe: Pipe
@@ -48,7 +49,7 @@ public class ProcessRunner {
     public let stdInPipe: Pipe
     
     //Async process
-    public init(launchPath: String,
+    public required init(launchPath: String,
                 arguments: [String]? = nil,
                 environment: [String:String]? = nil,
                 stdOut: ((_ stdOutRead: FileHandle) -> Void)? = nil,
@@ -123,7 +124,7 @@ public class ProcessRunner {
     func write(_ data: Data) {
         stdInPipe.fileHandleForWriting.write(data)
     }
-    
+
     @discardableResult
     public static func synchronousRun(_ launchPath: String, arguments: [String]? = nil, printOutput: Bool = false, outputPrefix: String? = nil, environment: [String:String]? = nil) -> ProcessResult {
         do {
