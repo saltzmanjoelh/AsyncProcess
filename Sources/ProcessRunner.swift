@@ -124,7 +124,7 @@ public class ProcessRunner: ProcessRunnable {
     func write(_ data: Data) {
         stdInPipe.fileHandleForWriting.write(data)
     }
-
+    
     @discardableResult
     public static func synchronousRun(_ launchPath: String, arguments: [String]? = nil, printOutput: Bool = false, outputPrefix: String? = nil, environment: [String:String]? = nil) -> ProcessResult {
         do {
@@ -132,7 +132,10 @@ public class ProcessRunner: ProcessRunnable {
             var error: String?
             let prefix = outputPrefix != nil ? "\(outputPrefix!): " : ""
             let process = try ProcessRunner(launchPath: launchPath, arguments: arguments)
+            var isWriting = false
+            let serialQueue = DispatchQueue(label: "LockingQueue")
             process.stdOut { (handle: FileHandle) in
+                serialQueue.sync { isWriting = true }
                 if let str = String.init(data: handle.availableData as Data, encoding: .utf8) {
                     let line =  "\(prefix)\(str)"
                     output.append(line)
@@ -140,18 +143,29 @@ public class ProcessRunner: ProcessRunnable {
                         print(line)
                     }
                 }
-                
+                serialQueue.sync { isWriting = false }
             }
             process.stdErr { (handle: FileHandle) in
+                serialQueue.sync { isWriting = true }
                 let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
                 print("stdErr: \(str)")
                 if error == nil {
                     error = ""
                 }
                 error?.append(str)
+                serialQueue.sync { isWriting = false }
             }
             process.launch()
             while process.executingProcess.isRunning {
+                RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
+            }
+            //give it a second to wrap up writing
+            let isWritingCheck: () -> Bool = {
+                var ans = false
+                serialQueue.sync { ans = isWriting == true }
+                return ans
+            }
+            while isWritingCheck() {
                 RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
             }
             return (output, error, process.executingProcess.terminationStatus)
