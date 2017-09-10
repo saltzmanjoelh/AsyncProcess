@@ -1,4 +1,6 @@
 # ProcessRunner
+[![Build Status][image-1]][1] [![Swift Version][image-2]][2]
+
 Run Foundation Process asynchronously and perform easy reads and writes in closures.
 
 ```
@@ -19,3 +21,9 @@ process!.stdErr { (handle: FileHandle) in
 }
 process!.launch()
 ```
+
+[1]:	https://travis-ci.org/saltzmanjoelh/ProcessRuner
+[2]:	https://swift.org "Swift"
+
+[image-1]:	https://travis-ci.org/saltzmanjoelh/ProcessRuner.svg
+[image-2]:	https://img.shields.io/badge/swift-version%204-blue.svg
