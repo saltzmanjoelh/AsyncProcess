@@ -1,5 +1,6 @@
 
 import Foundation
+import Dispatch
 
 enum ProcessRunnerError: Error, CustomStringConvertible {
     case InvalidExecutable(path: String?)
@@ -56,7 +57,7 @@ public class ProcessRunner: ProcessRunnable {
                 stdErr: ((_ stdErrRead: FileHandle) -> Void)? = nil) throws {
         //Launch path
         executingProcess = Process()
-        executingProcess.launchPath = (launchPath as NSString).standardizingPath
+        executingProcess.launchPath = NSString(string: launchPath).standardizingPath
         guard let path = executingProcess.launchPath,
             FileManager.default.isExecutableFile(atPath: path) else {
                 throw ProcessRunnerError.InvalidExecutable(path: executingProcess.launchPath)
@@ -77,11 +78,15 @@ public class ProcessRunner: ProcessRunnable {
         
         //Pipes
         stdOutPipe = Pipe()
+        #if !os(Linux)
         stdOutPipe.fileHandleForReading.readabilityHandler = stdOut
+        #endif
         executingProcess.standardOutput = stdOutPipe
         
         stdErrPipe = Pipe()
+        #if !os(Linux)
         stdErrPipe.fileHandleForReading.readabilityHandler = stdErr
+        #endif
         executingProcess.standardError = stdErrPipe
         
         stdInPipe = Pipe()
@@ -102,6 +107,7 @@ public class ProcessRunner: ProcessRunnable {
     }
     ```
      */
+    #if !os(Linux)
     @discardableResult
     public func stdOut(_ reader: ((FileHandle) -> Void)?) -> Self {
         stdOutPipe.fileHandleForReading.readabilityHandler = reader
@@ -120,6 +126,7 @@ public class ProcessRunner: ProcessRunnable {
         stdErrPipe.fileHandleForReading.readabilityHandler = reader
         return self
     }
+    #endif
     
     func write(_ data: Data) {
         stdInPipe.fileHandleForWriting.write(data)
@@ -129,36 +136,42 @@ public class ProcessRunner: ProcessRunnable {
     public static func synchronousRun(_ launchPath: String, arguments: [String]? = nil, printOutput: Bool = false, outputPrefix: String? = nil, environment: [String:String]? = nil) -> ProcessResult {
         do {
             var output = ""
-            var error: String?
+            var error = ""
             let prefix = outputPrefix != nil ? "\(outputPrefix!): " : ""
             let process = try ProcessRunner(launchPath: launchPath, arguments: arguments)
             var isWriting = false
             let serialQueue = DispatchQueue(label: "LockingQueue")
+            #if !os(Linux)
             process.stdOut { (handle: FileHandle) in
                 serialQueue.sync { isWriting = true }
-                if let str = String.init(data: handle.availableData as Data, encoding: .utf8),
-                    str.count > 0 {
-                    let line =  "\(prefix)\(str)"
-                    output.append(line)
-                    if printOutput {
-                        print(line)
-                    }
-                }
+                handleOutputData(handle.availableData as Data,
+                                 output: &output,
+                                 printOutput: printOutput,
+                                 prefix: prefix)
                 serialQueue.sync { isWriting = false }
             }
             process.stdErr { (handle: FileHandle) in
                 serialQueue.sync { isWriting = true }
-                if let str = String.init(data: handle.availableData as Data, encoding: .utf8),
-                    str.count > 0 {
-                    print("stdErr: \(str)")
-                    if error == nil {
-                        error = ""
-                    }
-                    error?.append(str)
-                }
+                handleErrorData(handle.availableData as Data,
+                                error: &error,
+                                printOutput: printOutput,
+                                prefix: prefix)
                 serialQueue.sync { isWriting = false }
             }
+            #endif
             process.launch()
+            #if os(Linux)
+                serialQueue.sync {
+                    handleOutputData(process.stdOutPipe.fileHandleForReading.readDataToEndOfFile(),
+                                     output: &output,
+                                     printOutput: printOutput,
+                                     prefix: prefix)
+                    handleErrorData(process.stdErrPipe.fileHandleForReading.readDataToEndOfFile(),
+                                    error: &error,
+                                    printOutput: printOutput,
+                                    prefix: prefix)
+                }
+            #endif
             while process.executingProcess.isRunning {
                 RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
             }
@@ -171,10 +184,27 @@ public class ProcessRunner: ProcessRunnable {
             while isWritingCheck() {
                 RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
             }
-            return (output, error, process.executingProcess.terminationStatus)
+            return (output, error.count == 0 ? nil : error, process.executingProcess.terminationStatus)
             
         } catch let e {
             return (nil, String(describing: e), -1)
+        }
+    }
+    static func handleOutputData(_ data: Data, output: inout String, printOutput: Bool, prefix: String) {
+        if let str = String.init(data: data, encoding: .utf8),
+            str.count > 0 {
+            let line =  "\(prefix)\(str)"
+            output.append(line)
+            if printOutput {
+                print(line)
+            }
+        }
+    }
+    static func handleErrorData(_ data: Data, error: inout String, printOutput: Bool, prefix: String) {
+        if let str = String.init(data: data, encoding: .utf8),
+            str.count > 0 {
+            //                    print("stdErr: \(str)")
+            error.append(str)
         }
     }
 }
