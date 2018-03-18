@@ -136,7 +136,8 @@ public class ProcessRunner: ProcessRunnable {
             let serialQueue = DispatchQueue(label: "LockingQueue")
             process.stdOut { (handle: FileHandle) in
                 serialQueue.sync { isWriting = true }
-                if let str = String.init(data: handle.availableData as Data, encoding: .utf8) {
+                if let str = String.init(data: handle.availableData as Data, encoding: .utf8),
+                    str.count > 0 {
                     let line =  "\(prefix)\(str)"
                     output.append(line)
                     if printOutput {
@@ -147,12 +148,14 @@ public class ProcessRunner: ProcessRunnable {
             }
             process.stdErr { (handle: FileHandle) in
                 serialQueue.sync { isWriting = true }
-                let str = String.init(data: handle.availableData as Data, encoding: .utf8)!
-                print("stdErr: \(str)")
-                if error == nil {
-                    error = ""
+                if let str = String.init(data: handle.availableData as Data, encoding: .utf8),
+                    str.count > 0 {
+                    print("stdErr: \(str)")
+                    if error == nil {
+                        error = ""
+                    }
+                    error?.append(str)
                 }
-                error?.append(str)
                 serialQueue.sync { isWriting = false }
             }
             process.launch()
