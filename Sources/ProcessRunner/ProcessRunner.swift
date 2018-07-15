@@ -184,7 +184,7 @@ public class ProcessRunner: ProcessRunnable {
             while isWritingCheck() {
                 RunLoop.current.run(until: Date.init(timeIntervalSinceNow: TimeInterval(0.10)))
             }
-            return (output, error.count == 0 ? nil : error, process.executingProcess.terminationStatus)
+            return (output, error.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).count == 0 ? nil : error, process.executingProcess.terminationStatus)
             
         } catch let e {
             return (nil, String(describing: e), -1)
